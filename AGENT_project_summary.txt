@@ -1,0 +1,96 @@
+What the project does
+This is a hand-rolled agent -- no LangChain, no LangGraph. It answers questions for a
+fictional company (Nimbus Cloud Storage) by planning what it needs to do, calling tools
+to do it, and then reviewing its own draft answer before showing it to you. It reuses
+the RAG retriever built in Week 3 as one of its three tools.
+
+How it works
+1. PLAN: one Claude call, no tools attached, just asks "what will I need, and why?" --
+   a short bullet-point plan naming which tools it expects to use.
+2. ACT / OBSERVE: a plain while-loop. Call the API, check stop_reason. If Claude wants
+   a tool, run it in Python, hand the result back, and loop again. Repeat until Claude
+   stops asking for tools.
+3. REFLECT: a second Claude call, with a different system prompt telling it to act as a
+   strict reviewer, checks the draft answer for grounding and completeness. If it finds
+   real problems it sends specific feedback back into another act/observe round (capped
+   at 2 retries so it can't loop forever).
+
+The three tools
+- calculator: plain arithmetic, evaluated safely via Python's ast module (not eval()) so
+  the model can never smuggle real code through the expression string.
+- search_knowledge_base: Week 3's proven RAG pipeline (vector + BM25 keyword search fused
+  with Reciprocal Rank Fusion, then reranked) wrapped as a single callable function.
+- web_search: Anthropic's server-side tool -- Claude and Anthropic run the actual search;
+  our loop never executes it, it just has to recognize the block types correctly and
+  resend the turn unchanged if the server-side search hits its own step limit.
+
+What libraries we use
+- anthropic: the API client, including the manual tool-use loop and structured JSON
+  output for the critic's verdict.
+- chromadb, sentence-transformers, rank_bm25: unchanged from Week 3 -- same retrieval
+  pipeline, same corpus, same embedding model.
+- python-dotenv: loads the API key from .env.
+- pytest: tests the calculator's safety (rejects name lookups, function calls, attribute
+  access -- anything that isn't plain arithmetic) and the chunking logic (carried over
+  from Week 3 since chunking.py is unchanged).
+
+The trickiest part: mixing a server-side tool into a hand-written loop
+Claude's built-in web_search tool runs entirely on Anthropic's side -- it's not something
+our Python code executes. That means stop_reason isn't just "tool_use" vs "end_turn"
+here; there's a third case, "pause_turn", which fires if the server-side search hits its
+own internal iteration cap mid-turn. The fix is to resend the exact same conversation
+(not a new "keep going" message) so the server resumes automatically. Also: Claude can
+call our custom search_knowledge_base tool AND the web_search tool in the very same
+response -- the loop only has to react to the client-side one (search_knowledge_base),
+since the server-side blocks are already fully resolved by the time we see them.
+
+The four agentic patterns from the Week 4 reading, and where they live
+- Planning: make_plan() -- a dedicated, tool-free call before any action is taken.
+- Tool use: run_agent_loop() -- the manual while-loop described above.
+- Reflection: critique_answer() plus the bounded retry logic in answer_question().
+- Multi-agent (minimal): the worker system prompt and the critic system prompt are two
+  distinct roles doing two distinct jobs. This is the smallest possible multi-agent
+  setup -- not real multi-agent orchestration, just a worker and a reviewer.
+
+What a framework like LangGraph would have given us for free
+- Checkpointing: if this process crashes mid-loop, the conversation is just gone --
+  it only lives in a Python list in memory. A framework persists state so a crashed run
+  can resume.
+- Built-in, configurable retry/error-handling policies instead of one hardcoded loop cap.
+- Graph-based branching instead of nested if/for -- useful once you want different
+  failure modes to route to different recovery steps.
+- Visualization/tracing tooling instead of print statements.
+- Real multi-agent orchestration (many agents running concurrently, message passing,
+  shared memory) instead of two sequential calls with different prompts.
+- Cross-session memory -- right now nothing persists between separate questions.
+
+Real bugs hit while testing this live (not hypothetical -- these actually happened)
+- Reading only the FIRST text block in a response silently truncated answers mid-sentence.
+  Claude can split its answer across more than one text block in a single response. The
+  reflection step actually caught every truncated answer (a real point in favor of that
+  pattern) but couldn't fix a bug in our own code, only in the model's content. Fixed by
+  concatenating every text block instead of taking just the first.
+- max_tokens was tuned too low (2048) for adaptive thinking plus a growing tool-call
+  history. Bumped to 4096, and added an explicit check that warns if stop_reason ==
+  "max_tokens" so a silently truncated answer can't be mistaken for a complete one.
+- The critic has no idea what today's date is. When a live web search came back with a
+  genuinely current Python release, the critic flagged the release date as "implausible"
+  and "likely fabricated" -- purely because it postdates its own training data. A real
+  false positive, not a real problem with the answer. Shows a genuine limitation of the
+  reflection pattern as built here: a critic reasoning only from training knowledge will
+  sometimes distrust correct, current information that a tool legitimately retrieved.
+
+Honest limitations
+- The plan isn't enforced -- Claude can ignore it once it starts acting.
+- The critic is the same underlying model as the worker, just with a different prompt --
+  not a genuinely independent second opinion, so shared blind spots are possible (see the
+  date false-positive above).
+- No persistence or crash recovery.
+- Same small 5-document Nimbus corpus as Week 3, so conclusions about tool selection
+  quality are demo-scale, not a claim about how this behaves on a bigger tool surface.
+
+Simple summary
+A working example of an agent loop built by hand -- plan, act with tools (one local
+calculator, one local RAG retriever reused from Week 3, one server-side web search),
+and reflect on its own answer before responding -- with an honest list of what a
+framework would add on top of this if the agent needed to grow past demo scale.
