@@ -3,3 +3,4 @@ python-dotenv
 chromadb
 sentence-transformers
 rank_bm25
+pypdf

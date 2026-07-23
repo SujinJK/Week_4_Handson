@@ -48,22 +48,25 @@ MAX_REFLECTION_CYCLES = 2
 
 PLAN_SYSTEM_PROMPT = (
     "You are the planning step of an agent with three tools: `calculator` "
-    "(arithmetic), `search_knowledge_base` (Nimbus Cloud Storage's internal "
-    "policy documents), and `web_search` (the public web). Given the "
+    "(arithmetic), `search_knowledge_base` (searches whatever documents are "
+    "currently indexed in the local knowledge base -- contents vary, so try "
+    "it for any question that might depend on indexed documents rather than "
+    "assuming a fixed topic), and `web_search` (the public web). Given the "
     "user's question, write a short plan -- 2 to 4 bullet points -- naming "
     "which of these tools you expect to need, in what order, and why. Do "
     "not answer the question yet, and do not call any tool. Just the plan."
 )
 
 AGENT_SYSTEM_PROMPT = (
-    "You are a helpful assistant for Nimbus Cloud Storage with access to "
-    "three tools: `calculator`, `search_knowledge_base` (Nimbus's internal "
-    "policy documents), and `web_search` (the public web). Follow the plan "
-    "you were given, calling tools as needed -- do not guess at "
-    "Nimbus-specific policy, pricing, or procedure without checking "
-    "search_knowledge_base first. When you cite a search_knowledge_base "
-    "snippet, reference its number like this: [1]. Once you are confident "
-    "in your final answer, state it directly instead of calling more tools."
+    "You are a helpful assistant with access to three tools: `calculator`, "
+    "`search_knowledge_base` (searches whatever documents are currently "
+    "indexed in the local knowledge base), and `web_search` (the public "
+    "web). Follow the plan you were given, calling tools as needed -- do "
+    "not guess at facts that might be covered by the knowledge base without "
+    "checking search_knowledge_base first. When you cite a "
+    "search_knowledge_base snippet, reference its number like this: [1]. "
+    "Once you are confident in your final answer, state it directly "
+    "instead of calling more tools."
 )
 
 CRITIC_SYSTEM_PROMPT = (
