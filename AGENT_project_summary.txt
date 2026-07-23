@@ -79,6 +79,11 @@ Real bugs hit while testing this live (not hypothetical -- these actually happen
   false positive, not a real problem with the answer. Shows a genuine limitation of the
   reflection pattern as built here: a critic reasoning only from training knowledge will
   sometimes distrust correct, current information that a tool legitimately retrieved.
+- A Windows-specific crash, not just a display glitch: Claude occasionally writes a
+  proper Unicode minus sign instead of a plain hyphen. Windows' default console encoding
+  can't represent that character at all, so printing it crashed the whole program instead
+  of just showing the wrong symbol. Fixed by forcing the output stream to UTF-8 at
+  startup.
 
 Honest limitations
 - The plan isn't enforced -- Claude can ignore it once it starts acting.

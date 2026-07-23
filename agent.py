@@ -25,9 +25,17 @@ Run:
 """
 import json
 import pathlib
+import sys
 
 import anthropic
 from dotenv import load_dotenv
+
+# Claude's output can contain Unicode characters (e.g. a proper minus sign,
+# "-", U+2212) that Windows' default console codepage (cp1252) has no
+# mapping for -- printing one crashes with UnicodeEncodeError instead of
+# just showing a wrong glyph. Force UTF-8 on stdout so that can't happen.
+if sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import ingest
 from tools import CLIENT_TOOLS, TOOLS
