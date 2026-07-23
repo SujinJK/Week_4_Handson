@@ -84,6 +84,17 @@ Real bugs hit while testing this live (not hypothetical -- these actually happen
   can't represent that character at all, so printing it crashed the whole program instead
   of just showing the wrong symbol. Fixed by forcing the output stream to UTF-8 at
   startup.
+- The gnarliest one: web_search's internal code execution (used for its "dynamic
+  filtering") can get stuck mid-turn if our own client-side tool (search_knowledge_base)
+  gets called in the same turn and interrupts things. The next API call then crashed with
+  a "container_id is required" error. The documented fix for a normal code-execution tool
+  is to track a container ID and pass it back, but for this hidden web-search-driven
+  session that ID was never actually given to us -- there's no documented way to resume
+  it. Worked around it by detecting that specific error, clearing the orphaned bits out of
+  the conversation history, dropping web_search for the rest of that turn, and retrying --
+  the model already had what it needed from the other tool, so it finished the answer
+  anyway, and was honest that web search "wasn't actually available" instead of pretending
+  it had searched. This is a workaround, not a confirmed root-cause fix.
 
 Honest limitations
 - The plan isn't enforced -- Claude can ignore it once it starts acting.

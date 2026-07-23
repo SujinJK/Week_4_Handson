@@ -99,21 +99,69 @@ def make_plan(client: anthropic.Anthropic, question: str) -> str:
     return "".join(b.text for b in response.content if b.type == "text")
 
 
+_SERVER_TOOL_BLOCK_TYPES = {
+    "server_tool_use",
+    "web_search_tool_result",
+    "web_fetch_tool_result",
+    "bash_code_execution_tool_result",
+    "code_execution_tool_result",
+    "text_editor_code_execution_tool_result",
+}
+
+
+def _drop_server_tool_blocks(messages: list[dict]) -> list[dict]:
+    """Strip server-side-tool content blocks out of assistant turns.
+
+    Recovery step for the container_id BadRequestError below: web_search's
+    dynamic filtering runs code_execution under the hood, and if a
+    client-side tool call cuts the turn short while that session is still
+    open, the API leaves it "pending" with no documented way for us to
+    resume it (response.container is empty in that case, not the
+    populated id the docs describe for the standalone code_execution
+    tool). Removing the orphaned blocks from history clears the pending
+    state so the conversation can continue without web_search."""
+    cleaned = []
+    for msg in messages:
+        if msg["role"] != "assistant" or not isinstance(msg["content"], list):
+            cleaned.append(msg)
+            continue
+        kept = [b for b in msg["content"] if getattr(b, "type", None) not in _SERVER_TOOL_BLOCK_TYPES]
+        if kept:
+            cleaned.append({"role": "assistant", "content": kept})
+    return cleaned
+
+
 def run_agent_loop(client: anthropic.Anthropic, messages: list[dict]) -> tuple[str, list[dict]]:
     """The manual act/observe loop: call the API, and while Claude is asking
     for a client-side tool, run it and feed the result back. Also handles
     pause_turn, which the server-side web_search tool returns if its own
     internal search loop hits its iteration cap -- resending the same
     turn lets it resume automatically (see shared/tool-use-concepts.md)."""
+    tools = TOOLS
+    web_search_dropped = False
     for _ in range(MAX_TOOL_ITERATIONS):
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            system=AGENT_SYSTEM_PROMPT,
-            thinking={"type": "adaptive"},
-            tools=TOOLS,
-            messages=messages,
-        )
+        try:
+            response = client.messages.create(
+                model=MODEL,
+                max_tokens=4096,
+                system=AGENT_SYSTEM_PROMPT,
+                thinking={"type": "adaptive"},
+                tools=tools,
+                messages=messages,
+            )
+        except anthropic.BadRequestError as exc:
+            if web_search_dropped or "container_id is required" not in str(exc):
+                raise
+            # A client-tool call interrupted a web_search-driven code-execution
+            # session with no way for us to resume it -- see
+            # _drop_server_tool_blocks(). Recover once by clearing the orphaned
+            # blocks and continuing the rest of this turn without web_search.
+            print("  [recovering from a stuck web_search session -- retrying without web_search]")
+            messages = _drop_server_tool_blocks(messages)
+            tools = [t for t in TOOLS if t.get("name") != "web_search"]
+            web_search_dropped = True
+            continue
+
         messages = messages + [{"role": "assistant", "content": response.content}]
 
         # Server-side web_search calls never hit the "tool_use" branch below
