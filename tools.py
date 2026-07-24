@@ -29,7 +29,16 @@ def _eval_node(node: ast.AST) -> float:
     """Recursively evaluate a restricted arithmetic AST -- only numbers, the
     operators above, and parentheses are legal. No names, no function calls,
     no attribute access -- so the model can never smuggle arbitrary code
-    through the expression string the way a bare eval() would allow."""
+    through the expression string the way a bare eval() would allow.
+
+    For readers new to this: an AST (Abstract Syntax Tree) is what you get
+    when Python parses an expression like "2 + 3 * 4" into a tree instead
+    of just a string -- e.g. a "+" node with "2" as one branch and a "*"
+    node (itself holding "3" and "4") as the other. Walking that tree node
+    by node, as this function does, lets us compute the result ourselves
+    while only ever allowing the specific node types listed above -- so
+    there's no way to hide a function call or file access inside the
+    "expression" the model sends us, unlike a plain eval(expression) would."""
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
         return node.value
     if isinstance(node, ast.BinOp) and type(node.op) in _ALLOWED_OPERATORS:

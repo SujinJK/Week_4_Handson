@@ -139,7 +139,18 @@ def run_agent_loop(client: anthropic.Anthropic, messages: list[dict]) -> tuple[s
     for a client-side tool, run it and feed the result back. Also handles
     pause_turn, which the server-side web_search tool returns if its own
     internal search loop hits its iteration cap -- resending the same
-    turn lets it resume automatically (see shared/tool-use-concepts.md)."""
+    turn lets it resume automatically (see shared/tool-use-concepts.md).
+
+    For readers new to this: `client.messages.create(...)` below is one
+    network request to Claude -- you send the conversation so far
+    (`messages`) and get one `response` back. `response.stop_reason` is
+    Claude's way of telling us *why* it stopped generating text: because
+    it wants to use a tool ("tool_use"), because it's fully done
+    ("end_turn"), or because a server-side tool needs the turn resent
+    ("pause_turn"). Reading that one field is how this whole loop decides
+    what to do next -- run a tool and go again, or return the final
+    answer.
+    """
     tools = TOOLS
     web_search_dropped = False
     for _ in range(MAX_TOOL_ITERATIONS):

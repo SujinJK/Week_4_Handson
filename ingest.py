@@ -12,6 +12,24 @@ against the original markdown.
 Run this once (or whenever the corpus directory changes) before running agent.py:
     python ingest.py               # ingests corpus/ (default)
     python ingest.py corpus_pdf    # ingests a different directory instead
+
+For readers new to RAG, this file does the "build the searchable database"
+half of the pipeline (the "search it later" half lives in rag_tool.py):
+
+1. Read each document's raw text (a whole file, however long).
+2. "Chunk" it (see chunking.py) -- split that long text into small,
+   self-contained pieces of a few sentences each, since it's much easier
+   (and cheaper) to search over small pieces than one giant document.
+3. "Embed" each chunk -- run it through a small AI model that turns it
+   into a list of numbers representing its meaning (see rag_tool.py's
+   docstring for more on what that buys us).
+4. Store each chunk's text + its numbers + which file it came from in
+   Chroma, a "vector database" built specifically for searching by these
+   number-lists efficiently.
+
+Every time this script runs, it wipes and rebuilds the whole database from
+whatever's currently in corpus_dir -- so switching which folder you point
+it at fully replaces what agent.py can search, it doesn't merge the two.
 """
 import pathlib
 import sys

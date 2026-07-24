@@ -4,6 +4,27 @@ Same retrieval pipeline validated in Week 3 (hybrid vector+keyword search via
 Reciprocal Rank Fusion, then cross-encoder reranking) -- generation and the
 interactive trace-printing are dropped since here the agent (agent.py), not
 this module, is the one calling Claude and deciding what to show the user.
+
+For readers new to RAG, the four ideas below are used throughout this file:
+
+- "Embedding": converting a chunk of text into a list of numbers (a
+  vector) that represents its *meaning*. Two chunks about similar topics
+  end up with similar numbers, even if they don't share exact words --
+  that's what makes "vector search" possible.
+- "Vector search" (`_vector_search`): given the question's own embedding,
+  find the stored chunks whose embeddings are numerically closest to it.
+  Good at matching meaning, weaker at matching exact rare terms.
+- "BM25" (`_bm25_search`): a classic keyword-matching algorithm (no
+  embeddings involved) that scores chunks by how well their actual words
+  overlap with the question's words. Good at exact terms, blind to
+  synonyms/meaning.
+- "Reciprocal Rank Fusion" / RRF (`_hybrid_retrieve`) and "reranking"
+  (`_rerank`): vector search and BM25 each produce their own ranked list
+  for the same question; RRF is just a simple formula for merging two
+  ranked lists into one without needing their scores to be on the same
+  scale. Reranking then takes that merged shortlist and re-scores it with
+  a slower but more accurate model (a "cross-encoder") that looks at the
+  question and each chunk together, to pick the very best few.
 """
 import pathlib
 import re
@@ -83,6 +104,12 @@ def _hybrid_retrieve(collection: chromadb.Collection, question: str, k: int = IN
     for ranked_list in (vector_hits, keyword_hits):
         for rank, hit in enumerate(ranked_list):
             key = (hit["source"], hit["chunk_index"])
+            # RRF's whole trick: instead of combining vector distances and BM25
+            # scores directly (they're on totally different scales), only look
+            # at each chunk's *position* (rank) in each list. A chunk ranked
+            # #1 in either list scores 1/(RRF_K+1); #2 scores 1/(RRF_K+2); and
+            # so on -- so a chunk that ranks highly in *both* lists accumulates
+            # the most points once we sum across both loops.
             fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (RRF_K + rank + 1)
             chunk_lookup[key] = {**chunk_lookup.get(key, {}), **hit}
 
