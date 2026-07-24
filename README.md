@@ -53,9 +53,14 @@ Week_4_Handson/
 ├── agent.py          # the whole agent: plan / act-observe loop / reflect
 ├── tools.py           # calculator + search_knowledge_base + tool schemas
 ├── rag_tool.py         # Week 3's hybrid search + rerank, trimmed to one function
-├── ingest.py           # builds the Chroma vector store (same as Week 3)
+├── ingest.py           # builds the Chroma vector store -- now reads .md AND .pdf,
+│                       # and takes an optional corpus directory argument
 ├── chunking.py         # semantic chunker (copied from Week 3, unchanged)
+├── generate_sample_pdfs.py  # renders corpus/*.md as PDFs, for extraction-quality testing
 ├── corpus/             # the Nimbus sample docs (copied from Week 3)
+├── corpus_pdf/          # (gitignored) PDF versions of corpus/, generated on demand
+├── dissertation_corpus/ # (gitignored) scratch folder used to test ingestion against
+│                       # a real, unrelated PDF -- not part of the graded pipeline
 ├── tests/
 │   ├── test_tools.py    # calculator arithmetic + safety (rejects non-math input)
 │   └── test_chunking.py # chunking correctness (same tests as Week 3)
@@ -181,3 +186,36 @@ python -m pytest tests/ -q
 ```
 
 `tests/test_tools.py` checks the calculator's arithmetic and, more importantly, that it *rejects* anything that isn't plain arithmetic (name lookups, function calls, attribute access, string literals) — since a bare `eval()` on model-supplied input would be a code-execution vulnerability. `tests/test_chunking.py` is carried over unchanged from Week 3 since `chunking.py` is the same code.
+
+## Evaluation — why there's no precision/recall here
+
+This project reuses Week 3's retriever unchanged, and Week 3 already built a real evaluation harness for it — `eval/retrieval_eval.py` (Hit@k) and `eval/generation_eval.py` (LLM-as-judge for faithfulness/citation accuracy), both scoring 8/8 on Week 3's 5-document Nimbus corpus. That evaluation isn't repeated here; it still applies, since `rag_tool.py` is the same retrieval code, untouched.
+
+What Week 4 adds on top — planning, tool selection, and reflection — was **not** put through an equivalent formal evaluation. All testing here was manual: the 7 questions in "Example prompts to try" above, each checked by hand against an expected answer worked out from the source documents, plus ad hoc questions run against two experimental corpora (a PDF-rendered version of the same 5 docs, and a real 55-page dissertation) while testing PDF ingestion.
+
+**Why not formal metrics here:**
+- **Hit@k / precision / recall measure retrieval, not agent behavior.** The new things Week 4 actually built — does the plan correctly decide which tool to call, does the critic correctly catch a bad answer — aren't retrieval questions. Scoring them would need a different kind of eval set entirely (e.g. labeled scenarios with an expected tool-call sequence and an expected reflection verdict), which wasn't built.
+- **Manual spot-checking already found the real problems, faster.** Testing against the dissertation surfaced two genuine, concrete bugs (the chart-image data-extraction gap, and the hardcoded tool-scope prompt bug — see "Bugs we actually hit" above) without needing a labeled eval set first. A handful of well-chosen manual questions did the job a formal harness would have, at a fraction of the effort.
+- **The scale doesn't call for it yet.** Precision/recall infrastructure earns its cost once a corpus or question set is large or noisy enough that eyeballing a dozen examples stops being reliable. At 5–100 chunks, it isn't.
+
+If this project grew — a much bigger or messier tool surface, or graded criteria specifically requiring measured evaluation — building a Week 3-style harness (a labeled question set + Hit@k, extended with tool-call correctness and reflection-verdict accuracy) would be the natural next step, not a rewrite.
+
+## What's done vs. not done, and why
+
+**Done:**
+- Hand-rolled `plan → act/observe → reflect` loop, no framework (`agent.py`)
+- 3 tools wired in: `calculator` (safe AST eval), `search_knowledge_base` (Week 3's retriever, reused unchanged), `web_search` (server-side)
+- Minimal multi-agent pattern: distinct worker/critic prompts, bounded retry (`MAX_REFLECTION_CYCLES = 2`)
+- Every step logged to the terminal — plan, each tool call/result, reflection verdict, final answer
+- PDF ingestion added on top of the original markdown-only pipeline (`ingest.py` + `pypdf`), with a script to generate test PDFs from the existing corpus (`generate_sample_pdfs.py`)
+- Tested end-to-end against a real, unrelated 55-page PDF (an actual MSc dissertation) to stress-test chunking/embedding/retrieval outside the toy Nimbus corpus
+- Found and fixed a real bug live: a hardcoded tool-scope description that silently stopped the agent from even trying `search_knowledge_base` once the indexed corpus changed (see "Bugs we actually hit")
+- Unit tests for the calculator's safety and the chunker's correctness
+
+**Not done, and why:**
+- **No formal precision/recall/Hit@k evaluation of Week 4's own additions** (tool selection, reflection accuracy) — see "Evaluation" above for the reasoning; Week 3's Hit@k/LLM-judge harness still covers retrieval quality on the original corpus, since that code is unchanged.
+- **The chart/image data-extraction gap is flagged, not fixed.** Numbers that exist only inside a picture (e.g. a pie chart) in a PDF are invisible to `pypdf`'s plain text extraction — confirmed during dissertation testing (a toss-decision percentage never made it into the vector store). Fixing this would need `pdfplumber` (for real tables) or OCR (for genuinely image-only data); neither is implemented.
+- **No persistence or checkpointing** — a crash mid-loop loses the entire conversation, since `messages` only lives in a Python variable (see "What a framework like LangGraph would add").
+- **One vector-store collection at a time.** Switching between the Nimbus corpus, the PDF-rendered corpus, and the dissertation fully overwrites `chroma_db/` each time (`ingest.py` always deletes and rebuilds) — there's no way to query more than one corpus without re-ingesting.
+- **No regression tests for the new PDF ingestion path.** `tests/` still only covers the calculator and chunking, unchanged from Week 3 — nothing exercises `ingest.py`'s PDF branch or its `corpus_dir` argument.
+- **The plan isn't enforced, and there's no conversation memory across questions** — both already covered in "Where this stops" above.
